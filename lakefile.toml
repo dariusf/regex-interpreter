@@ -1,0 +1,10 @@
+name = "regex"
+version = "0.1.0"
+defaultTargets = ["regex"]
+
+[[lean_lib]]
+name = "Regex"
+
+[[lean_exe]]
+name = "regex"
+root = "Main"
