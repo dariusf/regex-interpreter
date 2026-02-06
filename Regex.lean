@@ -293,6 +293,143 @@ theorem disj_seq_distr (r r1 r2:Regex) (ns:List Int):
 
 -- prefix closure of failure. if shorter string fails to match, longer string fails
 
+def choice (x y:Option α) :=
+  match x with
+  | some _ => x
+  | none => y
+
+def f_distr_choice (f:Option α → Option α) (x y: Option α) : Prop :=
+  f (choice x y) = choice (f x) (f y)
+
+theorem f_distr_choice_defn (f:Option α → Option α) (x y: Option α) :
+  f_distr_choice f x y ↔
+    f (match x with | none => y | some res => some res) =
+    match f x with | none => f y | some res => some res
+:= by
+  simp [f_distr_choice, choice]
+  cases x
+  case none =>
+    cases f none <;> simp
+  case some val =>
+    cases f (some val) <;> simp
+
+theorem f_correct (u v y: Option α) :
+  f_distr_choice (fun z => choice y z) u v
+:= by
+  simp [f_distr_choice, choice]
+  cases y <;> simp
+
+-- forall r ns k f.
+--   matches_prefix_cps r ns (fun r1 -> k r1; r2. f r2) <:
+--     matches_prefix_cps r ns k; r1. f r1
+theorem matches_prefix_cont_assoc2 (r : Regex) (ns : List Int) (f k : Option (List Int) → Option (List Int))
+  -- Applying f after making a choice is the same as making the choice based on the result of f
+  -- f (x <|> y) = f x <|> f y
+  -- homomorphism on option
+  (h_f_dist : ∀ x y,
+    f (match x with | none => y | some res => some res) =
+    match f x with | none => f y | some res => some res) :
+  -- (h_f_dist : ∀ x y, f_distr_choice f x y) :
+  f (matches_prefix r ns k) = matches_prefix r ns (fun r1 => f (k r1)) := by
+  induction r generalizing ns k with
+  | Emp => rfl
+  | Atom a =>
+    simp [matches_prefix]
+    split
+    split
+    rfl
+    rfl
+    rfl
+  | Seq r1 r2 ih1 ih2 =>
+    simp [matches_prefix]
+    rw [ih1]
+    congr
+    ext res
+    split
+    . rfl
+    . simp [ih2]
+  | Disj r1 r2 ih1 ih2 =>
+    simp [matches_prefix]
+    -- case on whether the first regex fails
+    cases h : matches_prefix r1 ns k
+    case none =>
+      -- if it fails, use ih1 and the knowledge that it failed
+      rw [← ih2, ← ih1, h]
+      -- dsimp [f_distr_choice, choice] at h_f_dist
+      exact h_f_dist none (matches_prefix r2 ns k)
+
+    case some res =>
+      simp
+      -- if is succeeds, we need to know that f on some is?
+      rw [← ih1, h]
+      rw [← ih2]
+      specialize h_f_dist (some res) (matches_prefix r2 ns k)
+      simp at h_f_dist
+      exact h_f_dist
+
+def matches_prefix_pure (r: Regex) (ns: List Int) (k: List Int → Option (List Int)) : Option (List Int) :=
+  match r with
+  | Emp => k ns
+  | Atom a =>
+    match ns with
+    | b :: ns1 => if a = b then k ns1 else none
+    | _ => none
+  | .Seq r1 r2 =>
+    matches_prefix_pure r1 ns (fun rest => matches_prefix_pure r2 rest k)
+  | .Disj r1 r2 =>
+    (matches_prefix_pure r1 ns k).orElse (fun () => matches_prefix_pure r2 ns k)
+
+def find_all_cps (l : List α) (p : α → Bool) (k : α → Prop) : Prop :=
+  match l with
+  | [] => True
+  | x :: xs =>
+      let rest := find_all_cps xs p k
+      if p x then k x ∧ rest else rest
+
+theorem find_all_correct (l : List α) (p : α → Bool) (k : α → Prop):
+  find_all_cps l p k ↔ (∀ x ∈ l, p x = true → k x) := by
+  induction l with
+  | nil =>
+      -- simp [find_all_cps]
+      dsimp [find_all_cps]
+      -- simp?
+      simp only [List.not_mem_nil, false_implies, implies_true]
+  | cons x xs ih =>
+      simp [find_all_cps]
+      split
+      case cons.isTrue hpx =>
+          rw [ih]
+          constructor
+          case mp =>
+            intro ⟨ hx, hy ⟩
+            constructor
+            intro
+            assumption
+            assumption
+          case mpr =>
+            intro ⟨ h1, h2 ⟩
+            constructor
+            have h3: k x := h1 hpx
+            assumption
+            assumption
+      case cons.isFalse =>
+        rw [ih]
+        constructor
+        case mp H =>
+          intros
+          constructor
+          case left =>
+            intros n
+            have: False := H n
+            induction this
+          case right =>
+            assumption
+        case mpr =>
+          intro ⟨h1, h2⟩
+          intros x Hin Hp
+          have: k x := h2 x Hin Hp
+          assumption
+
 end cps
 
 namespace list
@@ -316,6 +453,8 @@ def matches_prefix (r:Regex) (ns:List Int) : List (List Int) :=
     List.append
       (matches_prefix r1 ns)
       (matches_prefix r2 ns)
+
+-- #check matches_prefix.induct
 
 def regex_matches (r:Regex) (ns:List Int) : Bool :=
   match matches_prefix r ns with

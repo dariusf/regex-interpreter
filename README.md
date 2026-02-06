@@ -1,1 +1,1 @@
-Various proofs about a regular expression interpreter
+Proofs about various regular expression interpreters
